@@ -7,7 +7,7 @@ Author: Arūnas Liuiza
 Version: 0.1.0
 Author URI: http://arunas.co/
 License: GPL2 or later
-Text Domain: tinyip
+Text Domain: tinyipblock
 Domain Path: /languages
 */
 
@@ -16,14 +16,29 @@ add_action('plugins_loaded',array('tinyIPblock','init'));
 
 class tinyIPblock {
   const API = 'https://api.managed.lt/grid/v1/';
+  // setup all filter/action hooks
   public static function init() {
-//    add_action( 'check_comment_flood',  array( 'tinyIPblock', 'comment'    ), 10, 3 );
+    self::pageview();
+    // add_action( 'check_comment_flood',  array( 'tinyIPblock', 'comment'    ), 10, 3 );
     add_filter( 'pre_comment_approved', array( 'tinyIPblock', 'spam'       ), 10, 2 );
     add_filter( 'wp_authenticate_user', array( 'tinyIPblock', 'login'      ), 10, 2 );
     add_filter( 'registration_errors',  array( 'tinyIPblock', 'register'   ), 10, 3 );
     add_filter( 'shake_error_codes',    array( 'tinyIPblock', 'shake'      ) );
     add_filter( 'wp_login_errors',      array( 'tinyIPblock', 'error'      ) );
   }
+  // check the ip on pageview, die()/wp_die() if positive
+  public static function pageview ( ) {
+    if ( !self::_check_ip() ) {
+      $ip = self::_get_ip_address();
+      do_action( 'tinyipblock_kickout', false, $ip );
+      if ( defined( 'DOING_AJAX' ) ) {
+        die( sprintf( __( 'A banned IP address (%1$s) tried to access the page.', 'tinyipblock' ), $ip ) );
+      }
+      wp_die( sprintf( __( 'A banned IP address (%1$s) tried to access the page.', 'tinyipblock' ), $ip ), 409 );
+    }
+  }
+
+  // check the ip on comment, die()/wp_die() if positive
   public static function comment ( $author_ip, $author_email, $date_gmt ) {
     if ( !self::_check_ip() ) {
       $ip = self::_get_ip_address();
@@ -34,6 +49,7 @@ class tinyIPblock {
       wp_die( sprintf( __( '%1$s tried to comment from a banned IP address (%2$s).', 'tinyipblock' ),  $author_email, $ip ), 409 );
     }
   }
+  // check the ip on comment, mark as Spam if positive
   public static function spam( $approved, $commentdata) {
     if ( !self::_check_ip() ) {
       $ip = self::_get_ip_address();
@@ -42,6 +58,7 @@ class tinyIPblock {
     }
     return $spam;
   }
+  // check for IP on registration
   public static function register ( $errors, $sanitized_user_login, $user_email ) {
     if ( !self::_check_ip() ) {
       $ip = self::_get_ip_address();
@@ -50,6 +67,7 @@ class tinyIPblock {
     }
     return $errors;
   }
+  // check the IP on login
   public static function login ( $user, $password ) {
     if ( !self::_check_ip() ) {
       $ip = self::_get_ip_address();
@@ -72,11 +90,12 @@ class tinyIPblock {
     }
     return $errors;
   }
+  // check for cached response in transiet, call API if not found.
   private static function _check_ip() {
     $result = true;
     $ip = self::_get_ip_address();
     $response = get_transient( 'tinyipblock_'.$ip );
-    if ( !$response ) {
+    if ( false === $response ) {
       $uri = self::API.$ip;
       $response = wp_remote_get( $uri );
       if ( 200 === $response['response']['code'] ) {
@@ -86,13 +105,13 @@ class tinyIPblock {
         $response = array( 'blacklisted' => false );
       }
     }
-    if ( $response->blacklisted ) {
+    if ( $response['blacklisted'] ) {
       $result = false;
     }
     return $result;
   }
+  // get ip address for current call
   private static function _get_ip_address() {
-    return '43.255.190.170';
     $server_ip_keys = array(
       'HTTP_CLIENT_IP',
       'HTTP_X_FORWARDED_FOR',
